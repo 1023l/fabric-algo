@@ -1,12 +1,16 @@
 # fabric-algo
 
-鞋型布柔性材料字符视觉检测：**实时计数 + OCR + 第三方 HTTP 接口**。
+通用视觉检测推理端：**目标检测 + OCR 识别 + 实时计数 + 第三方 HTTP 接口**。
+
+> 项目定位是一套与具体行业解耦的检测识别流水线（检测目标 → 区域文字识别 → 跟踪计数），
+> 当前以**纺织布片计数 / 鞋码识别**作为参考实现。仓库沿用 `fabric-algo` 名称，
+> 模型/数据集命名（`fabric` / `text` / `rec`）为数据集代号，不绑定行业。
 
 与标注训练平台 [train-center](https://github.com/1023l/train-center) 配合：那边产出 YOLO `.pt` 和 PaddleOCR inference，这边转成 TensorRT 后上线。
 
 ## 能做什么
 
-- Web 演示：上传视频、拖拽计数线、正向/反向过线、L/R/成双/鞋码
+- Web 演示：上传视频、拖拽计数线、正向/反向过线计数、目标属性（L/R / 成双 / 识别文本）
 - 算法 API：`POST /api/algo/process`（第三方软件每帧调一次）
 - 推理后端：TensorRT 11 engine（主路径）或 ONNX Runtime
 
@@ -60,6 +64,18 @@ python tools/api_smoke.py                                       # 算法接口�
 ```
 
 运行时不需要 PyTorch / Paddle；`tools/` 的导出/构建那一步需要（环境自动切换）。
+
+## 模型管理（上传即上线）
+
+页面底部「模型管理」支持上传训练平台「一键导出3个模型」生成的压缩包：
+
+```
+POST /api/models/upload   # 上传 model_bundle_*.zip
+GET  /api/models/task     # 转换进度（导出 ONNX -> TRT engine -> 热替换）
+GET  /api/models/current  # 当前生效版本（models/current.json）
+```
+
+后台自动完成 ONNX 导出、TRT engine 构建，并**先试加载、成功后热替换**在线模型（失败则旧模型继续服务）。
 
 ## 依赖
 

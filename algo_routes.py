@@ -4,10 +4,10 @@
 
 挂载前缀：/api/algo
 提供 4 个原子接口 + 1 个复合接口：
-  POST /api/algo/fabric         - 布片检测（fabric 模型）
+  POST /api/algo/fabric         - 目标检测（fabric 模型）
   POST /api/algo/text           - 文字区域检测（text 模型）
   POST /api/algo/ocr            - 单张裁剪图 OCR 识别（rec 模型，返回 text+score）
-  POST /api/algo/pieces_ocr     - 复合：布片检测 + 文字区检测 + 识别（每片返回 piece_box+texts+size+lr）
+  POST /api/algo/pieces_ocr     - 复合：目标检测 + 文字区检测 + 识别（每片返回 piece_box+texts+size+lr）
   POST /api/algo/count_frame    - 复合：带计数状态机的一帧处理（需调用方用 session_id 持状态）
 
 输入（4 种格式选 1，按优先级解析）：
@@ -182,7 +182,7 @@ def _ok(data: Any, t0: float):
 
 
 # ============================================================
-# 1. 布片检测
+# 1. 目标检测
 # ============================================================
 @router.post("/fabric")
 async def api_algo_fabric(
@@ -361,7 +361,7 @@ async def api_algo_ocr(image: UploadFile | None = File(None),
 
 
 # ============================================================
-# 4. 复合：布片检测 + 文字区检测 + OCR（每片独立结果）
+# 4. 复合：目标检测 + 文字区检测 + OCR（每片独立结果）
 # ============================================================
 _count_sessions: dict[str, dict] = {}
 # 上面 count_frame 共享 session，这里 pieces_ocr 不走 session。
@@ -371,7 +371,7 @@ _count_sessions: dict[str, dict] = {}
 def api_algo_pieces_ocr_json(body: _Body):
     """
     整帧调用（与实时页面逻辑一致）：
-      先 fabric 检测布片 -> 对每片裁剪 -> text 检测文字区 -> 竖文 rot90 -> rec 识别
+      先 fabric 检测目标 -> 对每片裁剪 -> text 检测文字区 -> 竖文 rot90 -> rec 识别
     返回 pieces[]：每个 piece = {piece_box, track_id（单帧恒等于索引）,
                           text_regions[{text_box, cls, cls_name, text, score}],
                           text (拼接后), shoe_size, lr_flag}

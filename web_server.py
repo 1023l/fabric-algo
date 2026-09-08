@@ -1,5 +1,7 @@
 # -*- coding: utf-8 -*-
-"""fabric-algo 实时检测 Web 服务（FastAPI）。
+"""通用视觉检测流水线 Web 服务（FastAPI）。
+
+定位：目标检测 + OCR 识别 + 跟踪计数的通用推理端（当前参考实现：纺织布片计数/鞋码识别）。
 
 功能（先以视频文件测试，后续接视频流/SDK）：
 - 上传视频 -> 浏览器实时显示检测画面（MJPEG 流）
@@ -390,11 +392,11 @@ def video_feed():
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="fabric-algo 实时检测 Web 服务")
+    parser = argparse.ArgumentParser(description="通用视觉检测流水线 Web 服务（fabric-algo）")
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8001)
     args = parser.parse_args()
-    print(f"fabric-algo Web 服务: http://{args.host}:{args.port}/")
+    print(f"视觉检测流水线 Web 服务（fabric-algo）: http://{args.host}:{args.port}/")
     _v = engine_paths()
     print(f"模型: fabric={_v['fabric'].name} "
           f"text={_v['text'].name} rec={_v['rec'].name}")
