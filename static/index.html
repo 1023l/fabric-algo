@@ -51,6 +51,14 @@
   .card .v.blue { color: #4aa3ff; } .card .v.yellow { color: #ffd54a; }
 
   .note { font-size: 12px; color: #777; line-height: 1.7; }
+
+  /* 模型管理 */
+  .model-admin { margin-top: 18px; border-top: 1px solid #333; padding-top: 12px; }
+  .model-admin h2 { font-size: 15px; color: #ccc; margin-bottom: 8px; }
+  .model-admin pre { background: #16171b; border: 1px solid #333; border-radius: 6px;
+                     padding: 8px 10px; font-size: 12px; line-height: 1.5; max-height: 220px;
+                     overflow-y: auto; white-space: pre-wrap; word-break: break-all;
+                     color: #9fd49f; display: none; margin-top: 8px; }
 </style>
 </head>
 <body>
@@ -94,6 +102,18 @@
   <div class="note">
     操作说明：① 上传视频（画面显示原始视频）→ ② 拖动红线到想要的计数位置 → ③ 选「测试/生产」模式（测试=画文字框+识别文字，生产=纯净无文字框/文字）→
     ④ 「开始」从头实时检测，「停止」暂停，「继续」从暂停处续播，想从头重来再点「开始」 → ⑤ 「导出」按当前模式从头完整跑一遍输出 mp4。
+  </div>
+
+  <!-- ============================= 模型管理 ============================= -->
+  <div class="model-admin">
+    <h2>模型管理</h2>
+    <div class="upload">
+      <button class="btn" id="maBtn">上传模型包（.zip）</button>
+      <input type="file" id="maInput" accept=".zip">
+      <span class="note" id="maInfo">当前模型加载中…</span>
+    </div>
+    <div class="note">上传训练平台「模型管理 → 一键导出3个模型」生成的压缩包，自动完成 ONNX 导出 → TRT engine 构建 → 热替换（全程约 2-4 分钟，期间旧模型照常服务；检测运行中请先「停止」）。</div>
+    <pre id="maLog"></pre>
   </div>
 </div>
 
@@ -214,6 +234,64 @@ function resetUI() {
   $('sSizes').textContent = '-';
 }
 
+/* ---------- 模型管理：上传模型包 -> 自动转换 -> 热替换 ---------- */
+let maPolling = false;
+function fmtVersions(cur) {
+  return cur ? `当前：${cur.fabric} · ${cur.text} · ${cur.rec}` : '当前模型加载中…';
+}
+async function loadCurrent() {
+  try {
+    const r = await (await fetch('/api/models/current')).json();
+    $('maInfo').textContent = fmtVersions(r.current);
+    if (r.task && r.task.status === 'running') pollMaTask();
+  } catch (err) { $('maInfo').textContent = '当前模型：获取失败'; }
+}
+$('maBtn').onclick = () => $('maInput').click();
+$('maInput').onchange = async e => {
+  const file = e.target.files[0];
+  e.target.value = '';
+  if (!file) return;
+  $('maInfo').textContent = `上传中 ${file.name}（${(file.size / 1e6).toFixed(0)} MB）…`;
+  const fd = new FormData();
+  fd.append('file', file);
+  try {
+    const resp = await fetch('/api/models/upload', {method: 'POST', body: fd});
+    const r = await resp.json();
+    if (!resp.ok) { $('maInfo').textContent = '上传失败: ' + (r.detail || r.msg || resp.status); return; }
+    $('maInfo').textContent = `已接收（fabric${r.versions.fabric} / text${r.versions.text} / rec${r.versions.rec}），转换中…`;
+    pollMaTask();
+  } catch (err) {
+    $('maInfo').textContent = '上传失败: ' + err;
+  }
+};
+async function pollMaTask() {
+  if (maPolling) return;
+  maPolling = true;
+  $('maBtn').disabled = true;
+  $('maLog').style.display = 'block';
+  try {
+    while (true) {
+      const t = await (await fetch('/api/models/task')).json();
+      $('maLog').textContent = (t.log || []).join('\n');
+      $('maLog').scrollTop = $('maLog').scrollHeight;
+      if (t.status !== 'running') {
+        if (t.status === 'ok') {
+          $('maInfo').textContent = '模型替换成功，已生效 ✓（页面如需重启检测请重新点「开始」）';
+        } else if (t.status === 'failed') {
+          $('maInfo').textContent = '转换失败（旧模型仍在线），详见下方日志';
+        } else {
+          $('maInfo').textContent = fmtVersions(null);
+          loadCurrent();
+        }
+        break;
+      }
+      await new Promise(r => setTimeout(r, 1500));
+    }
+  } catch (err) { /* 忽略，下一次加载时重试 */ }
+  maPolling = false;
+  $('maBtn').disabled = false;
+}
+
 /* ---------- 状态轮询 ---------- */
 async function poll() {
   try {
@@ -259,7 +337,7 @@ async function poll() {
   } catch (err) { /* 后端未就绪 */ }
 }
 setInterval(poll, 600);
-setTimeout(() => { resizeCanvas(); poll(); }, 300);
+setTimeout(() => { resizeCanvas(); poll(); loadCurrent(); }, 300);
 </script>
 </body>
 </html>

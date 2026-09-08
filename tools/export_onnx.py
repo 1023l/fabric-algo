@@ -24,21 +24,24 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from _common import cfg, fa_root, models_dir, relaunch_if_needed, tc_root, version  # noqa: E402
 
 
-def export_det(model: str, ver: str) -> None:
-    """YOLO .pt -> ONNX（需 torch/ultralytics）。"""
+def export_det(model: str, ver: str, pt: str | None = None) -> None:
+    """YOLO .pt -> ONNX（需 torch/ultralytics）。pt 直接指定源文件时忽略 train-center 目录。"""
     relaunch_if_needed("ultralytics", "yolo_bench")
     from ultralytics import YOLO  # noqa: E402
 
     d = cfg()["det"]
     pt_dir = tc_root() / "models" / "det"
-    names = ["fabric", "text"] if model == "all" else [model]
+    if pt:
+        names = [model]
+    else:
+        names = ["fabric", "text"] if model == "all" else [model]
     for name in names:
-        pt = pt_dir / f"{name}{ver}.pt"
-        if not pt.is_file():
-            print(f"[export] 跳过，不存在: {pt}")
+        src = Path(pt) if pt else pt_dir / f"{name}{ver}.pt"
+        if not src.is_file():
+            print(f"[export] 跳过，不存在: {src}")
             continue
-        print(f"[export] {name}{ver}.pt -> ONNX (imgsz={d['imgsz']}, nms={d['nms']}, opset={d['opset']})")
-        m = YOLO(str(pt))
+        print(f"[export] {src.name} -> ONNX (imgsz={d['imgsz']}, nms={d['nms']}, opset={d['opset']})")
+        m = YOLO(str(src))
         exported = Path(m.export(format="onnx", imgsz=d["imgsz"], nms=d["nms"], opset=d["opset"]))
         dst_dir = models_dir(name)
         dst_dir.mkdir(parents=True, exist_ok=True)
@@ -53,8 +56,8 @@ def export_det(model: str, ver: str) -> None:
     print("[export] det done")
 
 
-def export_rec(ver: str, arch: str) -> None:
-    """PaddleOCR best.pdparams -> 动态宽 ONNX（需 paddlepaddle）。"""
+def export_rec(ver: str, arch: str, src: str | None = None) -> None:
+    """PaddleOCR best.pdparams -> 动态宽 ONNX（需 paddlepaddle）。src 直接指定模型目录。"""
     relaunch_if_needed("paddle", "paddle_ocr")
     import yaml as _yaml  # noqa: E402
     sys.path.insert(0, str(tc_root() / "PaddleOCR"))
@@ -63,7 +66,7 @@ def export_rec(ver: str, arch: str) -> None:
 
     r = cfg()["rec"]
     yml = tc_root() / "PaddleOCR" / (r["train_yml_server"] if arch == "server" else r["train_yml_mobile"])
-    model_dir = tc_root() / "models" / "ocr" / f"rec{ver}"
+    model_dir = Path(src) if src else tc_root() / "models" / "ocr" / f"rec{ver}"
     out = models_dir("rec") / f"rec{ver}_onnx"
 
     with open(yml, encoding="utf-8") as fp:
@@ -97,12 +100,16 @@ def main() -> None:
     p.add_argument("--model", default="all", choices=["fabric", "text", "all"], help="det 模式下导出哪些")
     p.add_argument("--version", default=None, help="版本号（默认取 config.versions）")
     p.add_argument("--arch", default="server", choices=["server", "mobile"], help="rec 模式用哪套训练配置")
+    p.add_argument("--pt", default=None, help="det: 直接指定 .pt 源文件路径（默认 train_center/models/det/{model}{ver}.pt）")
+    p.add_argument("--src", default=None, help="rec: 直接指定含 best.pdparams 的模型目录（默认 train_center/models/ocr/rec{ver}）")
     a = p.parse_args()
 
     if a.kind == "det":
-        export_det(a.model, a.version or version("fabric"))
+        if a.pt and a.model == "all":
+            p.error("--pt 指定源文件时 --model 不能为 all（fabric/text 版本可能不同）")
+        export_det(a.model, a.version or version("fabric"), a.pt)
     else:
-        export_rec(a.version or version("rec"), a.arch)
+        export_rec(a.version or version("rec"), a.arch, a.src)
 
 
 if __name__ == "__main__":

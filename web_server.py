@@ -33,13 +33,9 @@ from onnx_engine import RecTrtEngine
 from infer_business import make_ocr_callback
 from tracker import SimpleTracker
 from algo_routes import router as algo_router
+from model_admin import router as model_admin_router
+from model_admin import engine_paths
 
-MODEL_DIR = ROOT / "models"
-DEFAULT_MODELS = {
-    "fabric": MODEL_DIR / "fabric" / "fabric20260828V2.engine",
-    "text": MODEL_DIR / "text" / "text20260831V1.engine",
-    "rec": MODEL_DIR / "rec" / "rec20260828V3.engine",
-}
 UPLOAD_DIR = ROOT / "runs" / "uploads"
 EXPORT_DIR = ROOT / "runs" / "infer"
 PUSH_MAX_W = 1080      # MJPEG 推送画面最大宽度（缩放省带宽）
@@ -52,14 +48,17 @@ IOU = 0.45
 
 app = FastAPI(title="fabric-algo 实时检测")
 app.include_router(algo_router)
+app.include_router(model_admin_router)
 
 
 @app.middleware("http")
 async def _hard_timeout(request, call_next):
-    """全局 8s 硬超时：防止某个 API 阻塞导致整页无响应。"""
+    """全局 8s 硬超时：防止某个 API 阻塞导致整页无响应。
+    模型包上传（数百 MB）与转换进度轮询放宽到 10 分钟。"""
     import asyncio
+    timeout = 600 if request.url.path.startswith("/api/models/") else 8
     try:
-        return await asyncio.wait_for(call_next(request), timeout=8)
+        return await asyncio.wait_for(call_next(request), timeout=timeout)
     except asyncio.TimeoutError:
         from fastapi.responses import JSONResponse
         return JSONResponse(status_code=504,
@@ -100,18 +99,25 @@ def _publish_jpeg(frame_bgr: np.ndarray) -> None:
         state["latest_frame"] = buf.tobytes()
 
 
+def build_model_set(paths: dict) -> dict:
+    """按给定 engine 路径加载一整套模型（首次加载 / 模型管理热替换共用）。"""
+    from onnx_engine import TrtOnnxDetector
+    return {
+        "fabric": TrtOnnxDetector(paths["fabric"], imgsz=640,
+                                  conf=FABRIC_CONF, iou=IOU),
+        "text": TrtOnnxDetector(paths["text"], imgsz=640,
+                                conf=TEXT_CONF, iou=IOU),
+        "rec": [RecTrtEngine.load(paths["rec"],
+                                  score_thresh=REC_THRESH,
+                                  max_width=REC_MAX_W)
+                for _ in range(OCR_WORKERS)],
+    }
+
+
 def get_models() -> dict:
-    """按需加载 fabric/text/rec 模型（TRT engine，只加载一次）。"""
+    """按需加载 fabric/text/rec 模型（TRT engine，只加载一次；版本读 models/current.json）。"""
     if _models["fabric"] is None:
-        from onnx_engine import TrtOnnxDetector
-        _models["fabric"] = TrtOnnxDetector(DEFAULT_MODELS["fabric"], imgsz=640,
-                                            conf=FABRIC_CONF, iou=IOU)
-        _models["text"] = TrtOnnxDetector(DEFAULT_MODELS["text"], imgsz=640,
-                                          conf=TEXT_CONF, iou=IOU)
-        _models["rec"] = [RecTrtEngine.load(DEFAULT_MODELS["rec"],
-                                            score_thresh=REC_THRESH,
-                                            max_width=REC_MAX_W)
-                          for _ in range(OCR_WORKERS)]
+        _models.update(build_model_set(engine_paths()))
     return _models
 
 
@@ -182,7 +188,7 @@ def _run_engine(video: str, output: str | None, save_video: bool,
     result = None
     try:
         result = run_count_video_generic(
-            detect_fn, video, str(DEFAULT_MODELS["fabric"]),
+            detect_fn, video, str(engine_paths()["fabric"]),
             line_ratio=init_line_ratio, dead_zone=15, max_track_age=60,
             output=output, font_path=find_chinese_font(), show=False,
             ocr_callback=ocr_cb, show_ocr_text=show_ocr_text,
@@ -389,8 +395,9 @@ def main() -> None:
     parser.add_argument("--port", type=int, default=8001)
     args = parser.parse_args()
     print(f"fabric-algo Web 服务: http://{args.host}:{args.port}/")
-    print(f"模型: fabric={DEFAULT_MODELS['fabric'].name} "
-          f"text={DEFAULT_MODELS['text'].name} rec={DEFAULT_MODELS['rec'].name}")
+    _v = engine_paths()
+    print(f"模型: fabric={_v['fabric'].name} "
+          f"text={_v['text'].name} rec={_v['rec'].name}")
     print("[init] 预热 fabric/text/rec 模型（TRT engine 首次加载较慢，约 20-30s）...", flush=True)
     t0 = time.time()
     get_models()

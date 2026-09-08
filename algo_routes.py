@@ -45,9 +45,6 @@ from infer_business import make_ocr_callback
 
 # --------- 默认路径（与 web_server.py 共用同一套模型） ---------
 MODEL_DIR = ROOT / "models"
-DEFAULT_FABRIC_ENGINE = MODEL_DIR / "fabric" / "fabric20260828V2.engine"
-DEFAULT_TEXT_ENGINE = MODEL_DIR / "text" / "text20260831V1.engine"
-DEFAULT_REC_ENGINE = MODEL_DIR / "rec" / "rec20260828V3.engine"
 
 # --------- 默认阈值（与 web_server 同步，可通过 JSON body 覆盖） ---------
 DEFAULT_FABRIC_CONF = 0.4
@@ -65,22 +62,26 @@ _models: dict[str, Any] = {"fabric": None, "text": None, "rec": None, "rec_n": 1
 
 
 def _ensure_models(rec_workers: int = 1):
-    """懒加载模型。返回 {fabric, text, rec: [engine,...]}。"""
+    """懒加载模型。engine 版本读 models/current.json（模型管理上传后自动热替换）。
+    返回 {fabric, text, rec: [engine,...]}。"""
     with _lock:
         if _models["fabric"] is None:
-            _models["fabric"] = TrtOnnxDetector(DEFAULT_FABRIC_ENGINE, imgsz=DEFAULT_IMGSZ,
-                                                 conf=DEFAULT_FABRIC_CONF, iou=DEFAULT_IOU)
-        if _models["text"] is None:
-            _models["text"] = TrtOnnxDetector(DEFAULT_TEXT_ENGINE, imgsz=DEFAULT_IMGSZ,
-                                               conf=DEFAULT_TEXT_CONF, iou=DEFAULT_IOU)
+            from model_admin import engine_paths
+            eng = engine_paths()
+            _models["fabric"] = TrtOnnxDetector(eng["fabric"], imgsz=DEFAULT_IMGSZ,
+                                                conf=DEFAULT_FABRIC_CONF, iou=DEFAULT_IOU)
+            _models["text"] = TrtOnnxDetector(eng["text"], imgsz=DEFAULT_IMGSZ,
+                                              conf=DEFAULT_TEXT_CONF, iou=DEFAULT_IOU)
         if _models["rec"] is None or len(_models["rec"]) < rec_workers:
             # 初始按请求 worker 数扩容；上限 8，避免显存爆炸
+            from model_admin import engine_paths
+            eng = engine_paths()
             n = max(1, min(8, int(rec_workers)))
             engines = list(_models["rec"] or [])
             while len(engines) < n:
-                engines.append(RecTrtEngine.load(DEFAULT_REC_ENGINE,
-                                                  score_thresh=DEFAULT_REC_THRESH,
-                                                  max_width=DEFAULT_REC_MAX_W))
+                engines.append(RecTrtEngine.load(eng["rec"],
+                                                 score_thresh=DEFAULT_REC_THRESH,
+                                                 max_width=DEFAULT_REC_MAX_W))
             _models["rec"] = engines
             _models["rec_n"] = n
         return _models
