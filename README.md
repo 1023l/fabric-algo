@@ -67,15 +67,19 @@ python tools/api_smoke.py                                       # 算法接口�
 
 ## 模型管理（上传即上线）
 
-页面底部「模型管理」支持上传训练平台「一键导出3个模型」生成的压缩包：
+页面底部「模型管理」支持两种上传方式：
 
 ```
-POST /api/models/upload   # 上传 model_bundle_*.zip
-GET  /api/models/task     # 转换进度（导出 ONNX -> TRT engine -> 热替换）
-GET  /api/models/current  # 当前生效版本（models/current.json）
+POST /api/models/upload         # 整包：model_bundle_*.zip（训练平台「一键导出3个模型」产物）
+POST /api/models/upload_single  # 单模型：fabric/text 传 .pt；rec 传 rec*.zip 或模型文件夹
+GET  /api/models/task           # 转换进度（导出 ONNX -> TRT engine -> 热替换）
+GET  /api/models/current        # 当前生效版本（models/current.json）
 ```
 
-后台自动完成 ONNX 导出、TRT engine 构建，并**先试加载、成功后热替换**在线模型（失败则旧模型继续服务）。
+- **整包**：3 个模型一起替换；**单模型**：只转换上传的那个，其余保持当前版本
+- 单模型命名约定：`fabric20260910V1.pt` / `text20260910V1.pt` / rec 文件夹 `rec20260910V1/`（须含 best.pdparams）
+- 后台自动完成 ONNX 导出、TRT engine 构建，并**先试加载、成功后热替换**在线模型（失败则旧模型继续服务）
+- 上传版本须不同于当前生效版本（防重复，如需重建请改版本号）
 
 ## 依赖
 

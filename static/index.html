@@ -110,9 +110,17 @@
     <div class="upload">
       <button class="btn" id="maBtn">上传模型包（.zip）</button>
       <input type="file" id="maInput" accept=".zip">
+      <button class="btn" id="maSingleBtn">上传单个模型（.pt/.zip）</button>
+      <input type="file" id="maSingleInput" accept=".pt,.zip">
+      <button class="btn" id="maRecDirBtn">上传 rec 文件夹</button>
+      <input type="file" id="maRecDirInput" webkitdirectory multiple>
       <span class="note" id="maInfo">当前模型加载中…</span>
     </div>
-    <div class="note">上传训练平台「模型管理 → 一键导出3个模型」生成的压缩包，自动完成 ONNX 导出 → TRT engine 构建 → 热替换（全程约 2-4 分钟，期间旧模型照常服务；检测运行中请先「停止」）。</div>
+    <div class="note">
+      ① 整包：上传训练平台「一键导出3个模型」生成的压缩包，自动完成 ONNX 导出 → TRT engine 构建 → 热替换（全程约 2-4 分钟，期间旧模型照常服务；检测运行中请先「停止」）。<br>
+      ② 单模型：fabric / text 直接传 .pt（文件名如 fabric20260910V1.pt）；rec 传训练平台下载的 rec*.zip 或整个模型文件夹（须含 best.pdparams），只转换该模型、其余保持当前版本。<br>
+      上传的版本号须不同于当前生效版本（同名版本会被拦截，如需重建请改版本号）。
+    </div>
     <pre id="maLog"></pre>
   </div>
 </div>
@@ -264,10 +272,49 @@ $('maInput').onchange = async e => {
     $('maInfo').textContent = '上传失败: ' + err;
   }
 };
+
+/* 单模型上传：fabric/text 传 .pt；rec 传 rec*.zip 或模型文件夹（只转该模型） */
+$('maSingleBtn').onclick = () => $('maSingleInput').click();
+$('maSingleInput').onchange = async e => {
+  const file = e.target.files[0];
+  e.target.value = '';
+  if (!file) return;
+  if (maPolling) { $('maInfo').textContent = '已有转换任务在执行，请稍候'; return; }
+  const fd = new FormData();
+  fd.append('files', file, file.name);
+  await uploadSingle(fd, `${file.name}（${(file.size / 1e6).toFixed(0)} MB）`);
+};
+$('maRecDirBtn').onclick = () => $('maRecDirInput').click();
+$('maRecDirInput').onchange = async e => {
+  const all = [...e.target.files];
+  e.target.value = '';
+  if (!all.length) return;
+  if (maPolling) { $('maInfo').textContent = '已有转换任务在执行，请稍候'; return; }
+  // 只传 best.pdparams + inference.yml（训练 checkpoint 等大文件不需要）
+  const files = all.filter(f => /(^|\/)(best\.pdparams|inference\.yml)$/.test(f.webkitRelativePath || f.name));
+  if (!files.length) { $('maInfo').textContent = '上传失败: 所选文件夹中没有 best.pdparams（请选择训练产物 rec* 文件夹）'; return; }
+  const total = files.reduce((s, f) => s + f.size, 0);
+  const fd = new FormData();
+  for (const f of files) fd.append('files', f, f.webkitRelativePath || f.name);
+  const folder = (files[0].webkitRelativePath || '').split('/')[0] || '文件夹';
+  await uploadSingle(fd, `${folder}/（${files.length} 个文件，${(total / 1e6).toFixed(0)} MB）`);
+};
+async function uploadSingle(fd, desc) {
+  $('maInfo').textContent = `上传中 ${desc}…`;
+  try {
+    const resp = await fetch('/api/models/upload_single', {method: 'POST', body: fd});
+    const r = await resp.json();
+    if (!resp.ok) { $('maInfo').textContent = '上传失败: ' + (r.detail || r.msg || resp.status); return; }
+    $('maInfo').textContent = `已接收（${r.kind}${r.version}），转换中…（其余模型保持当前版本）`;
+    pollMaTask();
+  } catch (err) {
+    $('maInfo').textContent = '上传失败: ' + err;
+  }
+}
 async function pollMaTask() {
   if (maPolling) return;
   maPolling = true;
-  $('maBtn').disabled = true;
+  ['maBtn', 'maSingleBtn', 'maRecDirBtn'].forEach(id => $(id).disabled = true);
   $('maLog').style.display = 'block';
   try {
     while (true) {
@@ -289,7 +336,7 @@ async function pollMaTask() {
     }
   } catch (err) { /* 忽略，下一次加载时重试 */ }
   maPolling = false;
-  $('maBtn').disabled = false;
+  ['maBtn', 'maSingleBtn', 'maRecDirBtn'].forEach(id => $(id).disabled = false);
 }
 
 /* ---------- 状态轮询 ---------- */
