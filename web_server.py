@@ -213,6 +213,12 @@ def index():
     return (ROOT / "static" / "index.html").read_text(encoding="utf-8")
 
 
+@app.get("/health")
+def health():
+    """健康检查（接口文档承诺给第三方软件探活用）。"""
+    return {"status": "ok"}
+
+
 @app.post("/api/upload")
 async def upload(file: UploadFile = File(...)):
     """上传视频：保存到 runs/uploads，解析视频信息，抽第一帧预览。"""
