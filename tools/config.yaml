@@ -1,0 +1,57 @@
+# =====================================================================
+# fabric-algo/tools 统一配置 —— 换机器 / 换目录 / 出新模型只改这个文件
+# 所有 tools/*.py 脚本的路径、版本号、阈值都从这里读，命令行参数可覆盖。
+# =====================================================================
+
+# ---- 项目根目录（algo 与 center 成对使用）----
+train_center: C:/projects/train-center
+fabric_algo: C:/projects/fabric-algo
+
+# ---- conda 环境的 python.exe（det 链路用 yolo-bench，rec 链路用 paddle-ocr）----
+# 脚本缺依赖时会自动用这里的解释器重启自己，所以换机器只要改这两个路径。
+envs:
+  yolo_bench: C:/Users/Administrator/miniconda3/envs/yolo-bench/python.exe
+  paddle_ocr: C:/Users/Administrator/miniconda3/envs/paddle-ocr/python.exe
+
+# ---- 当前模型版本默认值（命令行 --version 可覆盖）----
+versions:
+  fabric: 20260828V2
+  text: 20260831V1
+  rec: 20260828V3
+
+# ---- TRT engine 构建 ----
+trt:
+  workspace: 1073741824          # 1GB workspace
+  # 计时缓存：同机重复构建 engine 提速（trt_cache 目录的长期用途）
+  timing_cache: C:/projects/trt_cache/trt11.cache
+  # rec 动态宽 profile（输入 1x3x48xW）
+  rec_width: { min: 16, opt: 64, max: 320 }
+
+# ---- 导出 / 中间产物暂存（trt_export 目录的长期用途：日志、临时 onnx、导出中间态）----
+staging:
+  dir: C:/projects/trt_export
+
+# ---- det 导出参数（与已验证版本一致，勿随意改）----
+det:
+  imgsz: 640
+  opset: 17
+  nms: true
+
+# ---- rec 导出参数 ----
+rec:
+  # 训练配置 yml（相对 train_center/PaddleOCR）
+  train_yml_server: configs/rec/PP-OCRv5/PP-OCRv5_server_rec.yml
+  train_yml_mobile: configs/rec/PP-OCRv5/PP-OCRv5_mobile_rec.yml
+  dict: data/rec_text/dict.txt   # 相对 train_center
+  val: data/rec_text/val.txt     # 相对 train_center
+
+# ---- 测速 / 验证用素材 ----
+bench:
+  video: C:/projects/fabric-algo/runs/infer/Video_20260818102140437.avi
+  n_frames: 20
+  rec_widths: [64, 32, 128, 192]   # 第一个是主测宽度，其余为对比
+
+# ---- 接口冒烟测试 ----
+smoke:
+  base: http://127.0.0.1:8001
+  image: C:/projects/fabric-algo/runs/infer/_compare_frames/raw/frame_000050.jpg

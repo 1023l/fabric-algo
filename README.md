@@ -35,11 +35,31 @@ rec 旁需保留 `inference.yml`（字符表），解码依赖它。
 
 ## 从 train-center 接到本仓库
 
-1. 拿到 `fabric*.pt`、`text*.pt`、`rec*/`（Paddle inference 目录）
-2. 在本机用 ultralytics / paddle2onnx 转 ONNX，再用 TRT 11+ 打 `.engine`
-3. 拷进 `models/fabric|text|rec/`，改 `web_server.py` / `algo_routes.py` 顶部路径即可
+用 `tools/` 统一脚本（配置集中在 [tools/config.yaml](./tools/config.yaml)，换机器/出新版本只改它）：
 
-运行时不需要 PyTorch / Paddle；转 engine 那一步需要。
+```bash
+# 1. 导出 ONNX（det 用 yolo-bench 环境，rec 自动切 paddle-ocr 环境）
+python tools/export_onnx.py det --model all --version 20260828V2
+python tools/export_onnx.py rec --version 20260828V3
+
+# 2. 构建 TRT engine（trt_cache 计时缓存加速重建；日志/中间产物在 trt_export）
+python tools/build_engine.py --model all
+
+# 3. 验证 & 测速
+python tools/verify.py engine          # 三 engine 加载+推理
+python tools/verify.py onnx --model all
+python tools/bench.py --model fabric
+
+# 4. rec 精度（逐样本 预测 vs 标签）
+python tools/eval_rec.py --backend onnx
+
+# 5. 数据 / 接口辅助
+python tools/crop_pieces.py --video xx.mp4 --out data_pieces/   # text 标注数据源
+python tools/restore_det_images.py --dataset det_text           # det 数据自救
+python tools/api_smoke.py                                       # 算法接口冒烟
+```
+
+运行时不需要 PyTorch / Paddle；`tools/` 的导出/构建那一步需要（环境自动切换）。
 
 ## 依赖
 
