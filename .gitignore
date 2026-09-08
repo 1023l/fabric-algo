@@ -1,0 +1,33 @@
+# 训练/推理输出
+runs/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# 大文件/数据（数据集不提交 git）
+*.avi
+*.mp4
+datasets/
+
+# 模型权重（各自拷到 models/，不入库）
+*.engine
+*.onnx
+*.pt
+*.pdparams
+*.pdiparams
+*.pdmodel
+*.trt
+models/
+
+# 内部立项/工作台材料，不公开
+.workbuddy/
+
+# IDE / OS
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+.env
+.env.*

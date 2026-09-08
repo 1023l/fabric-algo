@@ -1,0 +1,4 @@
+# fabric-algo 业务推理环境（轻量：纯 ONNX 推理，无需 torch / paddle）
+onnxruntime>=1.18
+opencv-python
+numpy

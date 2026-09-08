@@ -1,0 +1,265 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>fabric-algo 实时检测</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: "Microsoft YaHei", sans-serif; background: #1e1f24; color: #e8e8e8; min-height: 100vh; }
+  .wrap { max-width: 1200px; margin: 0 auto; padding: 16px; }
+  h1 { font-size: 20px; margin-bottom: 14px; color: #fff; }
+  h1 span { font-size: 13px; color: #888; font-weight: normal; margin-left: 10px; }
+
+  /* 上传 */
+  .upload { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-bottom: 14px; }
+  .upload input[type=file] { display: none; }
+  .btn { padding: 8px 18px; border: none; border-radius: 6px; cursor: pointer; font-size: 14px;
+         background: #3a3f4b; color: #e8e8e8; transition: .15s; }
+  .btn:hover { background: #4a505f; }
+  .btn.primary { background: #2f6fed; }
+  .btn.primary:hover { background: #4483ff; }
+  .btn.danger { background: #c0392b; }
+  .btn.danger:hover { background: #d95343; }
+  .btn.ok { background: #27ae60; }
+  .btn.ok:hover { background: #2fcc71; }
+  .btn:disabled { opacity: .45; cursor: not-allowed; }
+  .btn.big { padding: 10px 26px; font-size: 16px; }
+  .mode-group { display: inline-flex; gap: 0; }
+  .mode-group .btn { border-radius: 0; font-size: 13px; padding: 8px 14px; }
+  .mode-group .btn:first-child { border-radius: 6px 0 0 6px; }
+  .mode-group .btn:last-child { border-radius: 0 6px 6px 0; }
+
+  .video-wrap { position: relative; background: #000; border-radius: 10px; overflow: hidden;
+                margin-bottom: 14px; border: 1px solid #333; }
+  .video-wrap img { display: block; width: 100%; }
+  .video-wrap canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; cursor: ns-resize; }
+  .hint { position: absolute; right: 12px; top: 10px; font-size: 13px; color: #ffd54a;
+          background: rgba(0,0,0,.55); padding: 4px 10px; border-radius: 4px; pointer-events: none;
+          transition: opacity .5s ease-in-out; }
+
+  /* 控制条 */
+  .ctrl { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-bottom: 14px; }
+  .ctrl .info { font-size: 13px; color: #aaa; margin-left: auto; }
+
+  /* 状态 */
+  .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; margin-bottom: 10px; }
+  .card { background: #2a2d35; border-radius: 8px; padding: 12px 14px; }
+  .card .k { font-size: 12px; color: #999; margin-bottom: 4px; }
+  .card .v { font-size: 22px; font-weight: bold; color: #fff; }
+  .card .v.green { color: #2fcc71; } .card .v.orange { color: #f39c12; }
+  .card .v.blue { color: #4aa3ff; } .card .v.yellow { color: #ffd54a; }
+
+  .note { font-size: 12px; color: #777; line-height: 1.7; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>fabric-algo 实时检测<span>计数线可拖拽 · 实时显示 · 支持导出</span></h1>
+
+  <div class="upload">
+    <button class="btn" id="pickBtn">上传视频</button>
+    <input type="file" id="fileInput" accept="video/*">
+    <span class="note" id="videoInfo">未上传视频</span>
+  </div>
+
+  <div class="video-wrap">
+    <img id="stream" src="/video_feed" alt="实时画面">
+    <canvas id="lineCanvas"></canvas>
+    <div class="hint" id="lineHint">计数线：按住拖动调整位置</div>
+  </div>
+
+  <div class="ctrl">
+    <button class="btn primary big" id="startBtn">开始</button>
+    <button class="btn danger big" id="stopBtn">停止</button>
+    <button class="btn ok big" id="continueBtn" disabled>继续</button>
+    <button class="btn big" id="exportBtn">导出</button>
+    <span class="mode-group">
+      <button class="btn primary" id="modeTest">测试模式</button>
+      <button class="btn" id="modeProd">生产模式</button>
+    </span>
+    <span class="info" id="exportMsg"></span>
+  </div>
+
+  <div class="stats" id="statsBox">
+    <div class="card"><div class="k">正向过线</div><div class="v green" id="sDown">0</div></div>
+    <div class="card"><div class="k">反向过线</div><div class="v orange" id="sUp">0</div></div>
+    <div class="card"><div class="k">累计布片</div><div class="v blue" id="sNet">0</div></div>
+    <div class="card"><div class="k">左脚 L</div><div class="v" id="sL">0</div></div>
+    <div class="card"><div class="k">右脚 R</div><div class="v" id="sR">0</div></div>
+    <div class="card"><div class="k">成双 / 单只</div><div class="v yellow" id="sPairs">0 / 0</div></div>
+    <div class="card"><div class="k">鞋码</div><div class="v" id="sSizes">-</div></div>
+  </div>
+
+  <div class="note">
+    操作说明：① 上传视频（画面显示原始视频）→ ② 拖动红线到想要的计数位置 → ③ 选「测试/生产」模式（测试=画文字框+识别文字，生产=纯净无文字框/文字）→
+    ④ 「开始」从头实时检测，「停止」暂停，「继续」从暂停处续播，想从头重来再点「开始」 → ⑤ 「导出」按当前模式从头完整跑一遍输出 mp4。
+  </div>
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+let lineRatio = 0.5;
+let dragging = false;
+let sendTimer = null;
+
+/* ---------- 画布拖线 ---------- */
+const canvas = $('lineCanvas'), ctx = canvas.getContext('2d');
+const img = $('stream');
+
+function resizeCanvas() {
+  const r = img.getBoundingClientRect();
+  canvas.width = r.width; canvas.height = r.height;
+  drawLine();
+}
+function drawLine() {
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  const y = lineRatio * canvas.height;
+  ctx.strokeStyle = '#ff3b30'; ctx.lineWidth = 3;
+  ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(canvas.width, y); ctx.stroke();
+  // 箭头小三角提示可拖拽
+  ctx.fillStyle = '#ff3b30';
+  ctx.beginPath();
+  ctx.moveTo(0, y - 8); ctx.lineTo(16, y); ctx.lineTo(0, y + 8);
+  ctx.closePath(); ctx.fill();
+}
+img.onload = resizeCanvas;
+window.addEventListener('resize', resizeCanvas);
+
+canvas.addEventListener('mousedown', e => {
+  dragging = true;
+  window._lineDraggedEver = true;
+  updateRatio(e);
+});
+window.addEventListener('mousemove', e => {
+  if (!dragging) return;
+  updateRatio(e);
+});
+window.addEventListener('mouseup', () => { dragging = false; });
+
+function updateRatio(e) {
+  const r = img.getBoundingClientRect();
+  const y = e.clientY - r.top;
+  lineRatio = Math.max(0, Math.min(1, y / r.height));
+  drawLine();
+  clearTimeout(sendTimer);
+  sendTimer = setTimeout(sendLine, 80);  // 拖拽防抖发送
+}
+async function sendLine() {
+  try {
+    await fetch('/api/line', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ratio: lineRatio})
+    });
+  } catch (err) { /* 忽略 */ }
+}
+
+/* ---------- 上传 ---------- */
+$('pickBtn').onclick = () => $('fileInput').click();
+$('fileInput').onchange = async e => {
+  const file = e.target.files[0];
+  if (!file) return;
+  const fd = new FormData();
+  fd.append('file', file);
+  $('videoInfo').textContent = '上传中...';
+  try {
+    const resp = await fetch('/api/upload', {method: 'POST', body: fd});
+    const info = await resp.json();
+    $('videoInfo').textContent =
+      `${info.name}  ${info.width}×${info.height} @${info.fps}fps ${info.frames}帧`;
+    resetUI();  // 新视频：卡片归零，画面显示第一帧原图
+    sendLine();  // 同步当前拖线位置到新视频
+  } catch (err) {
+    $('videoInfo').textContent = '上传失败: ' + err;
+  }
+};
+
+/* ---------- 控制按钮 ---------- */
+async function api(path, method = 'POST') {
+  const resp = await fetch(path, {method});
+  return resp.json();
+}
+$('startBtn').onclick = async () => { await api('/api/start'); };
+$('stopBtn').onclick  = async () => { await api('/api/stop'); };
+$('continueBtn').onclick = async () => { await api('/api/continue'); };
+$('exportBtn').onclick = async () => {
+  $('exportMsg').textContent = '导出中...';
+  await api('/api/export');
+};
+
+/* ---------- 测试 / 生产模式切换 ---------- */
+let curMode = 'test';
+function updateModeBtns() {
+  $('modeTest').classList.toggle('primary', curMode === 'test');
+  $('modeProd').classList.toggle('primary', curMode === 'prod');
+}
+async function setMode(mode) {
+  try {
+    await fetch('/api/mode', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({mode})
+    });
+    curMode = mode;
+    updateModeBtns();
+  } catch (err) { /* 忽略 */ }
+}
+$('modeTest').onclick = () => setMode('test');
+$('modeProd').onclick = () => setMode('prod');
+
+function resetUI() {
+  $('sDown').textContent = '0'; $('sUp').textContent = '0'; $('sNet').textContent = '0';
+  $('sL').textContent = '0'; $('sR').textContent = '0'; $('sPairs').textContent = '0 / 0';
+  $('sSizes').textContent = '-';
+}
+
+/* ---------- 状态轮询 ---------- */
+async function poll() {
+  try {
+    const s = await (await fetch('/api/status')).json();
+    const st = s.stats || {};
+    if (st.down !== undefined) {
+      $('sDown').textContent = st.down;
+      $('sUp').textContent = st.up;
+      $('sNet').textContent = st.net;
+      $('sL').textContent = st.lr_l;
+      $('sR').textContent = st.lr_r;
+      $('sPairs').textContent = `${st.pairs} / ${st.single}`;
+      $('sSizes').textContent = st.sizes && Object.keys(st.sizes).length
+        ? Object.entries(st.sizes).sort((a,b)=>b[1]-a[1]).map(([k,v])=>`${k}(${v})`).join(' ') : '-';
+    }
+    // 计数线位置同步（外部变更时）
+    if (Math.abs(s.line_ratio - lineRatio) > 0.001) { lineRatio = s.line_ratio; drawLine(); }
+    // 模式同步
+    if (s.mode && s.mode !== curMode) { curMode = s.mode; updateModeBtns(); }
+    // 按钮状态：开始=从头；停止=暂停；继续=暂停后从原处续播
+    $('startBtn').disabled = s.running;
+    $('stopBtn').disabled = !s.running;
+    $('continueBtn').disabled = s.running || !s.has_session;
+    // 计数线提示：运行中 / 已拖拽过自动淡出（别挡画面）
+    const hint = $('lineHint');
+    if (s.running || window._lineDraggedEver) {
+      hint.style.opacity = s.running ? '0' : '0.35';
+    } else {
+      hint.style.opacity = '1';
+    }
+    // 导出状态
+    if (s.exporting) {
+      $('exportMsg').textContent = '导出中...（完整跑一遍，请稍候）';
+      $('exportBtn').disabled = true;
+    } else {
+      $('exportBtn').disabled = false;
+      if (s.export_path) {
+        $('exportMsg').innerHTML = `导出完成：<a href="/api/export_download" style="color:#4aa3ff">下载 ${s.export_path}</a>`;
+      } else {
+        $('exportMsg').textContent = '';
+      }
+    }
+  } catch (err) { /* 后端未就绪 */ }
+}
+setInterval(poll, 600);
+setTimeout(() => { resizeCanvas(); poll(); }, 300);
+</script>
+</body>
+</html>
