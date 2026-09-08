@@ -69,7 +69,8 @@ def _build(onnx_path: Path, out: Path, log, dynamic: dict | None = None, force: 
             blob = open(tc_path, "rb").read()
             log(f"  timing cache loaded: {tc_path} ({len(blob)} B)")
         cache = config.create_timing_cache(blob)
-        config.set_timing_cache(cache)
+        # TRT 11.x 必须带 ignore_mismatch 参数（缓存版本不匹配时忽略并继续构建）
+        config.set_timing_cache(cache, ignore_mismatch=True)
 
     # rec 动态宽 profile
     if dynamic:
@@ -92,7 +93,7 @@ def _build(onnx_path: Path, out: Path, log, dynamic: dict | None = None, force: 
     # 保存计时缓存供下次构建
     if cache is not None:
         try:
-            blob = cache.serialize()
+            blob = bytes(cache.serialize())  # IHostMemory -> bytes，否则 write 报 no len()
             if blob:
                 os.makedirs(os.path.dirname(tc_path), exist_ok=True)
                 with open(tc_path, "wb") as w:

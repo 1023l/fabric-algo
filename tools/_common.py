@@ -97,6 +97,8 @@ def relaunch_if_needed(module: str, env_key: str) -> None:
     py = cfg()["envs"].get(env_key)
     if py and Path(py).is_file() and Path(py).resolve() != Path(sys.executable).resolve():
         print(f"[relaunch] 当前环境缺 {module}，用 {py} 重跑 ...")
-        r = subprocess.run([py, str(Path(__file__).resolve()), *sys.argv[1:]])
+        # 注意：重跑目标必须是调用方脚本（sys.argv[0]，如 export_onnx.py），
+        # 而不是本库文件 _common.py——否则库文件无入口逻辑会秒退 0（静默"成功"）
+        r = subprocess.run([py, sys.argv[0], *sys.argv[1:]])
         sys.exit(r.returncode)
     raise SystemExit(f"[fatal] 缺依赖 {module}，且 config.envs.{env_key} 不可用（请检查 config.yaml）")

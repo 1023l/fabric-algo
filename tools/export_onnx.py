@@ -91,7 +91,11 @@ def export_rec(ver: str, arch: str, src: str | None = None) -> None:
 
     spec = [paddle.static.InputSpec(shape=[1, 3, 48, -1], dtype="float32", name="x")]
     paddle.onnx.export(model, input_spec=spec, path=str(out), opset_version=12)
-    print(f"[export] rec done -> {out}.onnx")
+    out_onnx = Path(f"{out}.onnx")
+    # 产物校验：历史上出现过导出"成功"但产物 0 字节的残留文件
+    if not out_onnx.is_file() or out_onnx.stat().st_size == 0:
+        raise RuntimeError(f"ONNX 导出失败：产物缺失或为 0 字节: {out_onnx}")
+    print(f"[export] rec done -> {out_onnx} ({out_onnx.stat().st_size / 1e6:.1f} MB)")
 
 
 def main() -> None:
