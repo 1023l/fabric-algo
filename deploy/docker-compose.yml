@@ -1,0 +1,32 @@
+services:
+  fabric-algo:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    image: fabric-algo:latest
+    container_name: fabric-algo
+    restart: unless-stopped
+    ports:
+      - "8001:8001"
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    volumes:
+      # 模型与运行产物持久化（engine 在容器内构建，落在挂载卷里）
+      - ../models:/app/models
+      - ../runs:/app/runs
+      # 容器版配置（路径为容器内路径）；模型上传会更新其中 versions，须持久化
+      - ./config.container.yaml:/app/tools/config.yaml
+      # TRT 计时缓存 / 工具日志（独立卷，跨容器重建保留）
+      - trt_cache:/app/trt_cache
+      - trt_export:/app/trt_export
+
+volumes:
+  trt_cache:
+  trt_export:

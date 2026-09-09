@@ -4,16 +4,19 @@
 接口（与 demo UI / 第三方 API 同进程，prefix=/api/models）：
   GET  /api/models/current        当前生效模型版本 + 后台任务状态
   POST /api/models/upload         上传 model_bundle_*.zip（训练平台"一键导出"产物，3 个模型）
-  POST /api/models/upload_single  上传单个模型（fabric/text 的 .pt；rec 的模型文件夹或 rec*.zip）
+  POST /api/models/upload_single  上传单个模型（fabric/text 的 .pt；rec 的 rec*.zip，内含 ONNX）
   GET  /api/models/task           后台转换任务进度（step + 日志尾部）
 
 上传后的自动流水线（后台线程）：
-  1. 部署源文件（.pt / rec 权重目录）到 models/
+  1. 部署源文件（.pt / rec ONNX）到 models/
   2. 更新 tools/config.yaml 的 versions
-  3. export_onnx.py（fabric / text / rec，rec 自动切 paddle-ocr 环境）
-  4. build_engine.py --model all --force（TRT engine，带计时缓存）
+  3. export_onnx.py det（fabric / text 的 .pt -> ONNX）
+  4. build_engine.py --force（ONNX -> TRT engine，带计时缓存）
   5. 先试加载新 engine（失败则保留旧模型并报 failed），成功后热替换
      web_server / algo_routes 的模型单例，并写 models/current.json
+
+rec 说明：rec 的 pdparams -> ONNX 导出已收敛到训练平台侧（paddle 环境），
+模型包与单个下载直接携带 ONNX，本模块（及 Docker 容器）无需 paddle 环境。
 
 约定：当前生效版本记录在 models/current.json（{"fabric": "fabric20260828V2", ...}），
      不存在时回退到下方 _FALLBACK（与历史硬编码一致）。
@@ -164,7 +167,7 @@ async def upload_model(file: UploadFile = File(...)):
         # 校验包内源文件齐全（此处仅检查，真正部署在后台线程做）
         for k, sub in (("fabric", f"det/fabric{versions['fabric']}.pt"),
                        ("text", f"det/text{versions['text']}.pt"),
-                       ("rec", f"ocr/rec{versions['rec']}/best.pdparams")):
+                       ("rec", f"ocr/rec{versions['rec']}_onnx.onnx")):
             if not (deploy / sub).is_file():
                 raise HTTPException(400, f"包内缺少 {sub}")
 
@@ -219,22 +222,25 @@ async def _save_upload(f: UploadFile, dst: Path, min_size: int = 1024) -> int:
 
 
 # ============================================================
-# 单模型上传（fabric/text 传 .pt；rec 传模型文件夹或 rec*.zip）
+# 单模型上传（fabric/text 传 .pt；rec 传训练平台下载的 rec*.zip，内含 ONNX）
 # ============================================================
 @router.post("/upload_single")
 async def upload_single(files: list[UploadFile] = File(...)):
     """上传单个模型并只转换该模型（其余两个保持当前版本不动）。
 
-    支持三种形式：
+    支持两种形式：
       a) 单个 .pt：文件名须为 fabric{YYYYMMDD}V{n}.pt / text{YYYYMMDD}V{n}.pt
-      b) 单个 .zip：训练平台 rec 模型下载产物（文件名 rec{ver}.zip，内含 best.pdparams）
-      c) 多文件（rec 模型文件夹整体上传）：文件名带相对路径 rec{ver}/best.pdparams
+      b) 单个 .zip：训练平台 rec 模型下载产物（文件名 rec{ver}.zip，内含 rec{ver}_onnx.onnx）
+
+    rec 的 pdparams -> ONNX 导出在训练平台侧完成，本接口不再接收 pdparams。
     """
     with _task_lock:
         if _task["status"] == "running":
             raise HTTPException(409, "已有转换任务在执行，请等待完成后再上传")
     if not files:
         raise HTTPException(400, "未收到文件")
+    if len(files) != 1:
+        raise HTTPException(400, "一次只上传一个文件（fabric*.pt / text*.pt / rec*.zip）")
 
     ts = time.strftime("%Y%m%d_%H%M%S")
     staging = INCOMING_DIR / f"single_{ts}"
@@ -243,66 +249,45 @@ async def upload_single(files: list[UploadFile] = File(...)):
         kind: str | None = None
         ver: str | None = None
 
-        if len(files) == 1:
-            f = files[0]
-            name = (f.filename or "").replace("\\", "/").strip("/")
-            low = name.lower()
-            # 版本号约定 V 大写，须用原始文件名匹配（不能先 lowercase）
-            m = re.match(r"^(fabric|text)(\d{8}V\d+)\.pt$", name)
-            if m:
-                # ---- a) fabric / text 的 .pt ----
-                kind, ver = m.group(1), m.group(2)
-                size = await _save_upload(f, staging / "det" / f"{kind}{ver}.pt")
-            elif low.endswith(".zip"):
-                # ---- b) rec 的 zip ----
-                zip_path = staging / "upload.zip"
-                size = await _save_upload(f, zip_path)
-                with zipfile.ZipFile(zip_path) as zf:
-                    names = [n.replace("\\", "/").strip("/") for n in zf.namelist()]
-                    ver = None
-                    sub = ""
-                    zm = re.match(r"^rec(\d{8}V\d+)\.zip$", name)
-                    if zm and "best.pdparams" in names:
-                        ver, sub = zm.group(1), ""            # train-center 下载产物：根级
-                    else:
-                        for n in names:                        # 自打包：rec{ver}/ 下
-                            pm = re.match(r"^(rec\d{8}V\d+)/best\.pdparams$", n)
-                            if pm:
-                                ver, sub = pm.group(1)[3:], pm.group(1)
-                                break
-                    if not ver:
-                        raise HTTPException(400, "zip 内未找到 best.pdparams 或无法确定版本号；"
-                                                 "请上传训练平台下载的 rec*.zip，或解压后按文件夹上传")
-                    kind = "rec"
-                    tmp = staging / "_z"
-                    _safe_extract(zf, tmp)
-                    src_root = tmp / sub if sub else tmp
-                    dst = staging / "ocr" / f"rec{ver}"
-                    dst.parent.mkdir(parents=True, exist_ok=True)
-                    shutil.move(str(src_root), str(dst))
-                    shutil.rmtree(tmp, ignore_errors=True)
-                zip_path.unlink()
-            else:
-                raise HTTPException(400, "请上传 fabric*.pt / text*.pt / rec*.zip，"
-                                         "或用『上传 rec 文件夹』选择整个模型文件夹")
+        f = files[0]
+        name = (f.filename or "").replace("\\", "/").strip("/")
+        low = name.lower()
+        # 版本号约定 V 大写，须用原始文件名匹配（不能先 lowercase）
+        m = re.match(r"^(fabric|text)(\d{8}V\d+)\.pt$", name)
+        if m:
+            # ---- a) fabric / text 的 .pt ----
+            kind, ver = m.group(1), m.group(2)
+            size = await _save_upload(f, staging / "det" / f"{kind}{ver}.pt")
+        elif low.endswith(".zip"):
+            # ---- b) rec 的 zip（内含 rec{ver}_onnx.onnx）----
+            zip_path = staging / "upload.zip"
+            size = await _save_upload(f, zip_path)
+            with zipfile.ZipFile(zip_path) as zf:
+                names = [n.replace("\\", "/").strip("/") for n in zf.namelist()]
+                ver, sub = None, ""
+                zm = re.match(r"^rec(\d{8}V\d+)\.zip$", name)
+                for n in names:
+                    om = re.match(r"^(?:rec\d{8}V\d+/)?rec(\d{8}V\d+)_onnx\.onnx$", n)
+                    if om:
+                        ver, sub = om.group(1), n
+                        break
+                if not ver:
+                    raise HTTPException(400, "zip 内未找到 rec*_onnx.onnx；"
+                                             "rec 的 ONNX 由训练平台导出，请从新版训练平台"
+                                             "「模型管理」重新下载 rec*.zip")
+                kind = "rec"
+                tmp = staging / "_z"
+                _safe_extract(zf, tmp)
+                onnx_src = tmp / sub
+                dst = staging / "ocr" / f"rec{ver}_onnx.onnx"
+                dst.parent.mkdir(parents=True, exist_ok=True)
+                shutil.move(str(onnx_src), str(dst))
+                shutil.rmtree(tmp, ignore_errors=True)
+            zip_path.unlink()
         else:
-            # ---- c) rec 文件夹整体上传（文件名含相对路径）----
-            for f in files:
-                rel = (f.filename or "").replace("\\", "/").strip("/")
-                base = rel.rsplit("/", 1)[-1].lower()
-                pm = re.match(r"^(rec\d{8}V\d+)/", rel)
-                if base == "best.pdparams":
-                    if not pm:
-                        raise HTTPException(400, "请选择 rec 模型文件夹整体上传（不要进入文件夹内多选文件）")
-                    kind, ver = "rec", pm.group(1)[3:]
-                    size += await _save_upload(f, staging / "ocr" / pm.group(1) / "best.pdparams")
-                elif base == "inference.yml" and pm:
-                    size += await _save_upload(f, staging / "ocr" / pm.group(1) / "inference.yml")
-                # 其余文件（训练 checkpoint 等）不需要，直接忽略
-            if kind != "rec":
-                raise HTTPException(400, "所选文件夹中缺少 best.pdparams（请选择训练产物 rec* 文件夹）")
+            raise HTTPException(400, "请上传 fabric*.pt / text*.pt，"
+                                     "或训练平台下载的 rec*.zip（内含 ONNX）")
 
-        assert kind and ver
         # 防重复：该模型版本 == 当前生效版本
         cur = current_versions()
         if cur[kind] == f"{kind}{ver}":
@@ -321,7 +306,7 @@ async def upload_single(files: list[UploadFile] = File(...)):
         threading.Thread(target=_pipeline, args=(staging, versions, (kind,)),
                          name="model-pipeline", daemon=True).start()
         return JSONResponse({"ok": True, "kind": kind, "version": ver, "versions": versions,
-                             "msg": f"已开始转换 {kind}{ver}（导出ONNX -> 构建engine -> 热替换），"
+                             "msg": f"已开始转换 {kind}{ver}（构建engine -> 热替换），"
                                     "请通过 /api/models/task 轮询进度"})
     except HTTPException:
         _cleanup(staging)
@@ -337,7 +322,7 @@ async def upload_single(files: list[UploadFile] = File(...)):
 def _pipeline(staging: Path, versions: dict, kinds: tuple) -> None:
     """后台转换流水线。
 
-    staging:  bundle 布局的源文件目录（det/*.pt、ocr/rec*/）
+    staging:  bundle 布局的源文件目录（det/*.pt、ocr/rec{ver}_onnx.onnx）
     versions: 3 个模型的完整目标版本（短版本号；未变化的保持当前值）
     kinds:    本次实际要转换的模型子集（fabric / text / rec 的任意组合）
     """
@@ -360,11 +345,7 @@ def _pipeline(staging: Path, versions: dict, kinds: tuple) -> None:
                                          "--version", versions["text"],
                                          "--pt", str(staging / "det" / f"text{versions['text']}.pt")])
 
-        if "rec" in kinds:
-            _step(f"导出 rec ONNX（{versions['rec']}，paddle-ocr 环境）")
-            _run_tool("export_onnx.py", ["rec", "--version", versions["rec"],
-                                         "--src", str(staging / "ocr" / f"rec{versions['rec']}")])
-
+        # rec 的 ONNX 由训练平台侧导出并随包携带，此处直接进 engine 构建
         for k in kinds:
             _step(f"构建 TRT engine（{k}{versions[k]}，--force 重建）")
             _run_tool("build_engine.py", ["--model", k, "--force"])
@@ -393,7 +374,7 @@ def _pipeline(staging: Path, versions: dict, kinds: tuple) -> None:
 
 
 def _deploy_sources(staging: Path, versions: dict, kinds: tuple = _KEYS) -> None:
-    """pt -> models/{fabric,text}/，rec 权重目录 -> models/rec/rec{ver}/（只部署 kinds 内的）。"""
+    """pt -> models/{fabric,text}/，rec ONNX -> models/rec/（只部署 kinds 内的）。"""
     for kind in ("fabric", "text"):
         if kind not in kinds:
             continue
@@ -403,12 +384,11 @@ def _deploy_sources(staging: Path, versions: dict, kinds: tuple = _KEYS) -> None
         shutil.copy2(src, dst)
         _log(f"{src.name} -> {dst.relative_to(ROOT)}")
     if "rec" in kinds:
-        rec_src = staging / "ocr" / f"rec{versions['rec']}"
-        rec_dst = MODEL_DIR / "rec" / f"rec{versions['rec']}"
-        if rec_dst.exists():
-            shutil.rmtree(rec_dst)
-        shutil.copytree(rec_src, rec_dst)
-        _log(f"{rec_src.name}/ -> {rec_dst.relative_to(ROOT)}")
+        src = staging / "ocr" / f"rec{versions['rec']}_onnx.onnx"
+        dst = MODEL_DIR / "rec" / src.name
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(src, dst)
+        _log(f"{src.name} -> {dst.relative_to(ROOT)}")
 
 
 def _update_cfg_versions(versions: dict) -> None:

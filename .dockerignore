@@ -1,0 +1,20 @@
+# 构建上下文排除（context = fabric-algo 根目录）
+.git
+.workbuddy
+.idea
+.vscode
+__pycache__
+**/__pycache__
+*.pyc
+
+# 大文件：模型 / 数据 / 视频不打进镜像（models 与 runs 由卷挂载）
+models/
+runs/
+datasets/
+*.engine
+*.onnx
+*.pt
+*.pdparams
+*.pdiparams
+*.avi
+*.mp4

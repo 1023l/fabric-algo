@@ -1,0 +1,44 @@
+# =====================================================================
+# fabric-algo 容器版配置（Docker 内路径）——由 compose 挂载到 /app/tools/config.yaml
+# 镜像内已内置同名文件；挂载是为了 _update_cfg_versions 写入的版本号能持久化。
+# =====================================================================
+
+train_center: /app          # 容器内无训练平台，占位（det 导出均以 --pt 显式传源文件）
+fabric_algo: /app
+
+# 容器内单一解释器已含全部依赖，不需要环境切换
+envs: {}
+
+versions:
+  fabric: 20260828V2
+  text: 20260831V1
+  rec: 20260828V3
+
+trt:
+  workspace: 1073741824          # 1GB workspace
+  timing_cache: /app/trt_cache/trt11.cache
+  rec_width: { min: 16, opt: 64, max: 320 }
+
+staging:
+  dir: /app/trt_export
+
+det:
+  imgsz: 640
+  opset: 17
+  nms: true
+
+rec:
+  # rec ONNX 由训练平台侧导出，容器内不用；占位保留结构
+  train_yml_server: configs/rec/PP-OCRv5/PP-OCRv5_server_rec.yml
+  train_yml_mobile: configs/rec/PP-OCRv5/PP-OCRv5_mobile_rec.yml
+  dict: data/rec_text/dict.txt
+  val: data/rec_text/val.txt
+
+bench:
+  video: /app/runs/infer/bench.avi
+  n_frames: 20
+  rec_widths: [64, 32, 128, 192]
+
+smoke:
+  base: http://127.0.0.1:8001
+  image: /app/runs/infer/smoke.jpg
