@@ -1,6 +1,7 @@
 # fabric-algo 运行时镜像依赖（Linux 容器版，对应 conda yolo-bench 环境）
 # 与 requirements-yolo-bench.txt 的差异：opencv 用 headless、torch 用 Linux CUDA 轮子、
 # 去掉 Windows 专属包（pyreadline3/colorama）与训练平台才需要的杂项。
+# 国内镜像加速由 Dockerfile 的 PIP_INDEX_URL 环境变量提供。
 
 # ── Web 服务 ──
 fastapi==0.141.1
@@ -23,7 +24,8 @@ onnx==1.21.0
 onnx_graphsurgeon==0.6.1
 polygraphy==0.53.4
 pillow==12.3.0
-nvidia-cuda-runtime-cu12==12.9.79
+# 与 torch==2.6.0+cu124 的 Linux 依赖对齐（torch 硬性要求 12.4.127）
+nvidia-cuda-runtime-cu12==12.4.127
 nvidia-ml-py==13.610.43
 pyyaml==6.0.3
 pydantic==2.13.4

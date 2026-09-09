@@ -24,6 +24,9 @@ models/
 # 内部立项/工作台材料，不公开
 .workbuddy/
 
+# Docker 构建用的本地大轮子（torch cu124 ~2.5GB，不入库）
+deploy/wheels/
+
 # IDE / OS
 .idea/
 .vscode/

@@ -85,7 +85,7 @@ GET  /api/models/current        # Current active version (models/current.json)
 
 ## Docker Deployment
 
-Containerized deployment config lives in [deploy/](./deploy/), based on `nvidia/cuda:12.4.1-runtime-ubuntu24.04` image with TRT, torch, ultralytics and other dependencies.
+Containerized deployment config lives in [deploy/](./deploy/), based on the `nvidia/cuda:12.5.1-runtime-ubuntu24.04` image with TRT, torch, ultralytics and other dependencies.
 
 ```bash
 cd fabric-algo

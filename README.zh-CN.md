@@ -85,7 +85,7 @@ GET  /api/models/current        # 当前生效版本（models/current.json）
 
 ## Docker 部署
 
-容器化部署配置位于 [deploy/](./deploy/)，基于 `nvidia/cuda:12.4.1-runtime-ubuntu24.04` 镜像，集成 TRT、torch、ultralytics 等依赖。
+容器化部署配置位于 [deploy/](./deploy/)，基于 `nvidia/cuda:12.5.1-runtime-ubuntu24.04` 镜像，集成 TRT、torch、ultralytics 等依赖。
 
 ```bash
 cd fabric-algo
