@@ -53,5 +53,5 @@ bench:
 
 # ---- 接口冒烟测试 ----
 smoke:
-  base: http://127.0.0.1:8001
+  base: http://127.0.0.1:8001/api/algo
   image: C:/projects/fabric-algo/runs/infer/_compare_frames/raw/frame_000050.jpg

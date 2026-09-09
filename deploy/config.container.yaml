@@ -40,5 +40,5 @@ bench:
   rec_widths: [64, 32, 128, 192]
 
 smoke:
-  base: http://127.0.0.1:8001
+  base: http://127.0.0.1:8001/api/algo
   image: /app/runs/infer/smoke.jpg
