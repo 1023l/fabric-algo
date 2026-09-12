@@ -36,6 +36,8 @@ h11==0.16.0
 watchfiles==1.2.0
 websockets==17.0.1
 python-dotenv==1.2.3
+openai==3.13.0
+open_clip_torch==3.3.0
 
 # ── 训练/导出用（ultralytics 相关，如不训练可去掉）──
 torch==2.6.0+cu124

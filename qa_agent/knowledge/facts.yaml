@@ -1,0 +1,38 @@
+# 产线计数数据口径与陷阱（查数前必读）
+version: "2026-09-12"
+facts:
+  - id: net-is-sub
+    category: 口径
+    tables: [pieces]
+    description: "累计产量 = 正向(direction='down') - 反向(direction='up')，不是相加。"
+    guidance: "汇总时用 down - up；v_hourly.net_cnt 已按此口径算好。"
+
+  - id: lr-flag-multi
+    category: 数据陷阱
+    tables: [pieces]
+    description: "lr_flag 可能是 'L/R'（一张布片 OCR 文字同时含 L 和 R 字样），统计 L 时需 LIKE '%L%' 而非 = 'L'。"
+    guidance: "store.stats_summary 已按 LIKE 口径统计；自写 SQL 时注意。"
+
+  - id: shoe-size-null
+    category: 数据陷阱
+    tables: [pieces]
+    description: "shoe_size 可为 NULL：OCR 未识别成功、或文字是货号类（WS5840 / -W-10 等）无鞋码结构。"
+    guidance: "鞋码分布只统计非 NULL；被问'总量按鞋码'时说明 NULL 部分不计入鞋码分布。"
+
+  - id: session-scope
+    category: 口径
+    tables: [pieces]
+    description: "session_id 一次 Start 检测一个会话；会话被删除（DELETE /api/algo/count_sessions/{sid} 或界面重置）时其数据同步删除。"
+    guidance: "被问'历史数据'时注意会话可能已被重置；track_id 跨会话重复，不可全局唯一假设。"
+
+  - id: ts-local-time
+    category: 口径
+    tables: [pieces]
+    description: "ts 为服务器本地时间（ISO 格式，无时区标记）。"
+    guidance: "与用户对时间时按本地时间理解；'今天'指服务器当天 00:00:00 起。"
+
+  - id: data-from-start
+    category: 数据陷阱
+    tables: [pieces]
+    description: "落库从问答功能上线后才开始，之前的检测数据不在库里。"
+    guidance: "若查询结果为空，先确认该时段是否真的有检测在跑，再回答'无记录'。"

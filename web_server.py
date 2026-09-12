@@ -37,6 +37,9 @@ from tracker import SimpleTracker
 from algo_routes import router as algo_router
 from model_admin import router as model_admin_router
 from model_admin import engine_paths
+from qa_routes import router as qa_router
+from vlm_routes import router as vlm_router
+from search_routes import router as search_router
 
 UPLOAD_DIR = ROOT / "runs" / "uploads"
 EXPORT_DIR = ROOT / "runs" / "infer"
@@ -51,6 +54,9 @@ IOU = 0.45
 app = FastAPI(title="fabric-algo 实时检测")
 app.include_router(algo_router)
 app.include_router(model_admin_router)
+app.include_router(qa_router)
+app.include_router(vlm_router)
+app.include_router(search_router)
 
 
 @app.middleware("http")
@@ -211,6 +217,19 @@ def _run_engine(video: str, output: str | None, save_video: bool,
 @app.get("/", response_class=HTMLResponse)
 def index():
     return (ROOT / "static" / "index.html").read_text(encoding="utf-8")
+
+
+@app.get("/files/{fpath:path}")
+def serve_file(fpath: str):
+    """静态文件服务（search_db 图库缩略图等）。禁止 .. 穿越。"""
+    if ".." in Path(fpath).parts:
+        raise HTTPException(403, "路径非法")
+    p = (ROOT / fpath).resolve()
+    if p == ROOT.resolve() or ROOT.resolve() not in p.parents:
+        raise HTTPException(403, "路径非法")
+    if not p.is_file():
+        raise HTTPException(404, "文件不存在")
+    return FileResponse(p)
 
 
 @app.get("/health")

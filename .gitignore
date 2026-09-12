@@ -24,6 +24,12 @@ models/
 # 内部立项/工作台材料，不公开
 .workbuddy/
 
+# 问答 Agent 的本地数据库（运行时数据不入库）
+qa_agent/data/
+
+# 以图搜图图库（运行时数据不入库）
+search_db/
+
 # Docker 构建用的本地大轮子（torch cu124 ~2.5GB，不入库）
 deploy/wheels/
 

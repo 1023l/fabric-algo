@@ -41,6 +41,7 @@ from onnx_engine import TrtOnnxDetector, RecTrtEngine
 from tracker import SimpleTracker
 from counter import LineCounter, extract_size
 from infer_business import make_ocr_callback
+from qa_agent import store as qa_store
 
 
 # --------- 默认路径（与 web_server.py 共用同一套模型） ---------
@@ -520,6 +521,11 @@ def api_algo_count_frame_json(body: _Body):
         old_txt = _apply_det_thresholds(m, body, "text")
         try:
             sess = _count_session(body.session_id, True, H, line_ratio, dead_zone, line_y)
+            # 问答数据落库：登记会话（失败不影响检测主流程）
+            try:
+                qa_store.touch_session(body.session_id, line_ratio)
+            except Exception:
+                pass
             # 允许后续帧调整 line_y（拖动计数线场景）
             sess["counter"].line_y = line_y
 
@@ -566,6 +572,16 @@ def api_algo_count_frame_json(body: _Body):
                                 sess["size_counts"][sz] = sess["size_counts"].get(sz, 0) + 1
                         sess["persist_texts"][tid] = txt
                         sess["pending_ocr"].pop(tid, None)
+                        # 问答数据落库：OCR 识别成功后回填 text/鞋码/左右脚（失败不影响检测）
+                        try:
+                            _up = txt.upper()
+                            _flags = [f for f in ("L", "R") if f in _up]
+                            qa_store.update_piece_text(
+                                body.session_id, tid, txt,
+                                extract_size(_up), "/".join(_flags) if _flags else None,
+                            )
+                        except Exception:
+                            pass
             # 3) 每片信息
             pieces = []
             for info in infos:
@@ -589,6 +605,16 @@ def api_algo_count_frame_json(body: _Body):
                     "shoe_size": sz,
                     "lr_flag": lr,
                 })
+                # 问答数据落库：过线事件先记方向（OCR 结果后续帧回填；失败不影响检测）
+                if info.get("crossed"):
+                    try:
+                        qa_store.record_piece(
+                            body.session_id, tid,
+                            "down" if info["side"] == "below" else "up",
+                            round(float(info["conf"]), 4), txt, sz, lr,
+                        )
+                    except Exception:
+                        pass
             c = sess["counter"]
             stats = {
                 "down": int(c.total_down), "up": int(c.total_up), "net": int(c.net),
@@ -636,7 +662,14 @@ def api_algo_count_sessions():
 @router.post("/count_sessions/reset")
 def api_algo_count_session_reset_all():
     """重置所有计数会话（回到零）。"""
+    sids = list(_count_sessions.keys())
     _count_sessions.clear()
+    # 问答数据落库联动：删除这些会话的落库记录（失败不影响重置）
+    try:
+        for sid in sids:
+            qa_store.remove_session(sid)
+    except Exception:
+        pass
     return JSONResponse({"ok": True, "reset_all": True})
 
 
@@ -644,6 +677,11 @@ def api_algo_count_session_reset_all():
 def api_algo_count_session_reset(sid: str):
     """释放/重置一个计数会话（比如视频结束了）。"""
     existed = _count_sessions.pop(sid, None)
+    # 问答数据落库联动（失败不影响重置）
+    try:
+        qa_store.remove_session(sid)
+    except Exception:
+        pass
     return JSONResponse({"ok": True, "reset": existed is not None})
 
 

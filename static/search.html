@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>布片以图搜图</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: "Segoe UI", "Microsoft YaHei", sans-serif; background: #f5f6f8; height: 100vh; display: flex; flex-direction: column; }
+  header { background: #1e293b; color: #fff; padding: 12px 20px; font-size: 16px; font-weight: 600; display: flex; justify-content: space-between; align-items: center; }
+  header a { color: #93c5fd; font-size: 13px; text-decoration: none; font-weight: 400; }
+  main { flex: 1; overflow-y: auto; padding: 20px; display: flex; flex-direction: column; gap: 16px; }
+  .card { background: #fff; border: 1px solid #e2e8f0; border-radius: 12px; padding: 16px; }
+  .card h3 { font-size: 14px; color: #475569; margin-bottom: 10px; }
+  .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+  #drop { border: 2px dashed #cbd5e1; border-radius: 10px; padding: 24px; text-align: center; color: #64748b; cursor: pointer; transition: .2s; }
+  #drop.hover { border-color: #2563eb; background: #eff6ff; }
+  #preview { max-height: 220px; border-radius: 8px; display: none; }
+  button { padding: 9px 18px; background: #2563eb; color: #fff; border: none; border-radius: 8px; font-size: 14px; cursor: pointer; }
+  button:disabled { background: #94a3b8; cursor: not-allowed; }
+  button.ghost { background: #fff; color: #2563eb; border: 1px solid #bfdbfe; }
+  input[type=text] { flex: 1; min-width: 260px; padding: 9px 12px; border: 1px solid #cbd5e1; border-radius: 8px; font-size: 14px; outline: none; }
+  #results { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 12px; }
+  .hit { border: 1px solid #e2e8f0; border-radius: 10px; overflow: hidden; background: #fff; }
+  .hit img { width: 100%; height: 130px; object-fit: cover; display: block; }
+  .hit .meta { padding: 6px 8px; font-size: 12px; color: #475569; display: flex; justify-content: space-between; }
+  .hit .score { color: #2563eb; font-weight: 600; }
+  #status { font-size: 12px; color: #64748b; }
+  .msg { font-size: 13px; padding: 8px 12px; border-radius: 8px; display: none; }
+  .msg.ok { display: block; background: #f0fdf4; color: #15803d; border: 1px solid #bbf7d0; }
+  .msg.err { display: block; background: #fef2f2; color: #b91c1c; border: 1px solid #fca5a5; }
+</style>
+</head>
+<body>
+<header>布片以图搜图 <a href="/">← 返回检测界面</a></header>
+<main>
+  <div class="card">
+    <h3>1. 入库：上传布片图，自动检测裁片并建立向量索引 <span id="status"></span></h3>
+    <div id="drop">点击选择图片，或拖拽到此处（可多选，批量入库）</div>
+    <input type="file" id="fileIndex" multiple accept="image/*" style="display:none">
+    <div class="row" style="margin-top:10px">
+      <button id="btnIndex" disabled>开始入库</button>
+      <button class="ghost" id="btnRefresh">刷新统计</button>
+    </div>
+    <div class="msg" id="msgIndex"></div>
+  </div>
+  <div class="card">
+    <h3>2. 搜图：上传一张布面照片，找图库中最相似的花型（top-k）</h3>
+    <div class="row">
+      <img id="preview" alt="">
+      <input type="text" id="qtext" placeholder="或输入文本搜索（英文效果更好，如 fabric texture）">
+      <button id="btnSearch" disabled>搜索</button>
+      <label style="font-size:13px;color:#475569">top-k <input type="number" id="topk" value="10" min="1" max="50" style="width:60px;padding:4px"></label>
+    </div>
+    <div class="msg" id="msgQuery"></div>
+  </div>
+  <div class="card">
+    <h3>搜索结果</h3>
+    <div id="results"><div style="color:#94a3b8;font-size:13px">尚无结果</div></div>
+  </div>
+</main>
+<script>
+const drop = document.getElementById('drop');
+const fileIndex = document.getElementById('fileIndex');
+const btnIndex = document.getElementById('btnIndex');
+const btnSearch = document.getElementById('btnSearch');
+const results = document.getElementById('results');
+const msgIndex = document.getElementById('msgIndex');
+const msgQuery = document.getElementById('msgQuery');
+let indexFiles = [], queryFile = null;
+
+function show(el, text, cls) { el.textContent = text; el.className = 'msg ' + cls; }
+
+async function refresh() {
+  const r = await (await fetch('/api/search/status')).json();
+  document.getElementById('status').textContent = `（图库 ${r.gallery_count} 条 · CLIP ${r.ready ? '就绪/' + r.device : '未加载'}）`;
+  btnSearch.disabled = r.gallery_count === 0;
+}
+refresh();
+
+drop.onclick = () => fileIndex.click();
+drop.ondragover = e => { e.preventDefault(); drop.classList.add('hover'); };
+drop.ondragleave = () => drop.classList.remove('hover');
+drop.ondrop = e => {
+  e.preventDefault(); drop.classList.remove('hover');
+  indexFiles = Array.from(e.dataTransfer.files).filter(f => f.type.startsWith('image/'));
+  btnIndex.disabled = !indexFiles.length;
+  show(msgIndex, `已选 ${indexFiles.length} 张待入库`, 'ok');
+};
+fileIndex.onchange = e => {
+  indexFiles = Array.from(e.target.files || []);
+  btnIndex.disabled = !indexFiles.length;
+  show(msgIndex, `已选 ${indexFiles.length} 张待入库`, 'ok');
+};
+
+btnIndex.onclick = async () => {
+  btnIndex.disabled = true;
+  let ok = 0, pieces = 0;
+  for (const f of indexFiles) {
+    const b64 = await toB64(f);
+    try {
+      const r = await (await fetch('/api/search/index/json?crop=true', {
+        method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ image_b64: b64 }),
+      })).json();
+      if (r.ok) { ok++; pieces += r.indexed; }
+      else show(msgIndex, '入库失败：' + (r.detail || ''), 'err');
+    } catch (e) { show(msgIndex, '入库失败：' + e.message, 'err'); }
+  }
+  show(msgIndex, `入库完成：${ok}/${indexFiles.length} 张，共索引 ${pieces} 个布片`, ok ? 'ok' : 'err');
+  indexFiles = []; fileIndex.value = ''; refresh();
+};
+
+// 查询图选择：复用同一 drop 区不合适，简单起见给搜索一个隐藏 input
+const fileQuery = document.createElement('input');
+fileQuery.type = 'file'; fileQuery.accept = 'image/*'; fileQuery.style.display = 'none';
+document.body.appendChild(fileQuery);
+fileQuery.onchange = async e => {
+  queryFile = e.target.files[0] || null;
+  if (queryFile) {
+    document.getElementById('preview').src = URL.createObjectURL(queryFile);
+    document.getElementById('preview').style.display = 'block';
+    btnSearch.disabled = false;
+  }
+};
+document.getElementById('preview').onclick = () => fileQuery.click();
+btnSearch.onclick = async () => {
+  const topk = document.getElementById('topk').value || 10;
+  let body;
+  if (queryFile) body = { image_b64: await toB64(queryFile) };
+  else {
+    const t = document.getElementById('qtext').value.trim();
+    if (!t) return show(msgQuery, '请选择查询图片或输入文本', 'err');
+    body = {};
+    var useText = t;
+  }
+  const qs = new URLSearchParams({ top_k: topk, min_score: '0.05' });
+  btnSearch.disabled = true;
+  try {
+    const r = await (await fetch('/api/search/query/json?' + qs, {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(useText ? { text: useText } : body),
+    })).json();
+    if (!r.ok) return show(msgQuery, '搜索失败：' + (r.detail || ''), 'err');
+    show(msgQuery, `命中 ${r.count} 条（${r.query_type} 查询，${r.elapsed_ms}ms）`, 'ok');
+    results.innerHTML = r.results.map(h => `
+      <div class="hit">
+        <img src="${h.url}" loading="lazy">
+        <div class="meta"><span>#${h.id}</span><span class="score">${h.score}</span></div>
+      </div>`).join('') || '<div style="color:#94a3b8;font-size:13px">无足够相似结果</div>';
+  } catch (e) { show(msgQuery, '搜索失败：' + e.message, 'err'); }
+  finally { btnSearch.disabled = false; }
+};
+document.getElementById('btnRefresh').onclick = refresh;
+
+function toB64(file) {
+  return new Promise((res, rej) => {
+    const r = new FileReader();
+    r.onload = () => res(r.result);
+    r.onerror = rej;
+    r.readAsDataURL(file);
+  });
+}
+</script>
+</body>
+</html>
