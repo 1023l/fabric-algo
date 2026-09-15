@@ -34,3 +34,4 @@ deploy/wheels/
 Thumbs.db
 .env
 .env.*
+!.env.example
